@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import ProjectCard from './components/ProjectCard'
 import KanbanBoard from './components/KanbanBoard'
-import { projectApi, taskApi } from './services/api'
+import { authStorage, projectApi, taskApi, type AuthUser } from './services/api'
+import AuthScreen from './components/AuthScreen'
 import type { Project, Task } from './types'
 import './App.css'
 
 function App() {
+  const [user, setUser] = useState<AuthUser | null>(() => authStorage.getToken() ? authStorage.getUser() : null)
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
@@ -51,8 +53,37 @@ function App() {
   }
 
   useEffect(() => {
-    loadProjects()
+    if (user) void loadProjects()
+  }, [user])
+
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setUser(null)
+      setProjects([])
+      setTasks([])
+      setSelectedProject(null)
+    }
+    window.addEventListener('shipflow:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('shipflow:unauthorized', handleUnauthorized)
   }, [])
+
+  function handleAuthenticated(authenticatedUser: AuthUser) {
+    setError('')
+    setUser(authenticatedUser)
+  }
+
+  function logout() {
+    authStorage.clear()
+    setUser(null)
+    setProjects([])
+    setTasks([])
+    setSelectedProject(null)
+    setActiveView('dashboard')
+  }
+
+  if (!user || !authStorage.getToken()) {
+    return <AuthScreen onAuthenticated={handleAuthenticated} />
+  }
 
   async function createProject(e: React.FormEvent) {
     e.preventDefault()
@@ -175,6 +206,9 @@ function App() {
           setSelectedProject(null)
           setTasks([])
         }}
+        userName={user.name}
+        userEmail={user.email}
+        onLogout={logout}
       />
 
       <main className="main-content">
