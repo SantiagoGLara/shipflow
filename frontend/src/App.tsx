@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Sidebar from './components/Sidebar'
 import ProjectCard from './components/ProjectCard'
-import TaskList from './components/TaskList'
+import KanbanBoard from './components/KanbanBoard'
 import { projectApi, taskApi } from './services/api'
 import type { Project, Task } from './types'
 import './App.css'
@@ -120,9 +120,7 @@ function App() {
         status,
       })
 
-      if (selectedProject) {
-        await loadTasks(selectedProject.id)
-      }
+      setTasks(current => current.map(item => item.id === task.id ? { ...item, status } : item))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'No se pudo actualizar la tarea')
     }
@@ -321,7 +319,7 @@ function App() {
                 <span className="task-counter">{tasks.length} tareas</span>
               </div>
 
-              <TaskList
+              <KanbanBoard
                 tasks={tasks}
                 onChangeStatus={changeTaskStatus}
                 onDelete={deleteTask}

@@ -525,3 +525,40 @@ h1 {
     flex-wrap: wrap;
   }
 }
+/* Tablero Kanban */
+.kanban-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(250px, 1fr));
+  gap: 18px;
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: 12px;
+}
+.kanban-column {
+  min-width: 250px;
+  background: #f0f2f7;
+  border: 1px solid #e6e9f0;
+  border-radius: 12px;
+  padding: 14px;
+  min-height: 330px;
+  transition: background .15s, border-color .15s;
+}
+.kanban-column:has(.kanban-drop-hint) { border-style: dashed; }
+.kanban-column-header { display: flex; justify-content: space-between; align-items: center; padding: 3px 2px 15px; }
+.kanban-column-header h3 { font-size: 13px; margin: 0 0 5px; }
+.kanban-column-header small { color: #929cac; font-size: 10px; }
+.kanban-count { display: grid; place-items: center; min-width: 27px; height: 27px; border-radius: 8px; background: white; color: #657187; font-size: 11px; font-weight: 700; }
+.kanban-cards { display: grid; gap: 11px; min-height: 245px; }
+.kanban-card { background: white; border: 1px solid #e8eaf0; border-radius: 10px; padding: 15px; box-shadow: 0 2px 5px #1c2c4510; cursor: grab; }
+.kanban-card:active { cursor: grabbing; }
+.kanban-card.is-dragging { opacity: .4; }
+.kanban-card-top { display: flex; justify-content: space-between; align-items: center; }
+.kanban-task-id { color: #929cac; font-size: 9px; font-weight: 800; letter-spacing: .7px; }
+.drag-handle { color: #aab2c0; font-size: 20px; line-height: 12px; }
+.kanban-card h4 { font-size: 13px; margin: 12px 0 6px; overflow-wrap: anywhere; }
+.kanban-card > p { font-size: 11px; line-height: 1.5; color: #8994a5; margin: 0 0 14px; overflow-wrap: anywhere; }
+.kanban-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 5px; border-top: 1px solid #f0f1f5; padding-top: 10px; }
+.kanban-card-footer select { min-width: 0; max-width: 68%; border: 1px solid #e8eaf0; border-radius: 6px; background: #fff; padding: 6px; color: #657187; font-size: 10px; }
+.kanban-drop-hint { border: 1px dashed #cbd1dd; border-radius: 8px; color: #a0a9b8; text-align: center; padding: 28px 8px; font-size: 11px; }
+.saving-label { display: block; color: #6375e9; font-size: 10px; margin-top: 8px; }
+@media (max-width: 900px) { .kanban-board { grid-template-columns: repeat(3, minmax(245px, 1fr)); } }
