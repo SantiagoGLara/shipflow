@@ -5,6 +5,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -96,9 +97,19 @@ public class WorkflowService {
   }
 
   private void audit(long p, String type, String aggregate, long id) {
+    // Auditoría relacional y evento Outbox se escriben dentro de la misma
+    // transacción de negocio: si la operación falla, ambos se revierten.
+    UUID eventId = UUID.randomUUID();
+    String aggregateId = Long.toString(id);
     db.update(
         "insert into audit_events(project_id,actor_id,event_type,aggregate_type,aggregate_id,payload) values (?,?,?,?,?,'{}'::jsonb)",
-        p, uid(), type, aggregate, "" + id);
+        p, uid(), type, aggregate, aggregateId);
+    db.update("""
+        INSERT INTO outbox_events(id, aggregate_type, aggregate_id, event_type, payload)
+        VALUES (?, ?, ?, ?, jsonb_build_object(
+            'projectId', ?, 'actorId', ?, 'aggregateId', ?, 'eventType', ?
+        ))
+        """, eventId, aggregate, aggregateId, type, p, uid(), aggregateId, type);
   }
 
   // C - tareas, comentarios y revisiones
@@ -242,6 +253,7 @@ public class WorkflowService {
     long id = db.queryForObject(
         "insert into test_results(test_run_id,test_name,status,duration_ms,details) values (?,?,?,?, '{}'::jsonb) returning id",
         Long.class, run, req(b, "testName"), s, b.get("durationMs"));
+    audit(p, "TEST_RESULT_RECORDED", "TEST_RESULT", id);
     return one("select * from test_results where id=?", id);
   }
 
@@ -288,6 +300,7 @@ public class WorkflowService {
         VALUES (?, ?, ?)
         ON CONFLICT DO NOTHING
         """, r, t, p);
+    if (inserted > 0) audit(p, "RELEASE_TASK_LINKED", "RELEASE", r);
 
     return one(
         "SELECT * FROM release_tasks WHERE release_id=? AND task_id=?",
@@ -395,10 +408,12 @@ public class WorkflowService {
       throw error(HttpStatus.BAD_REQUEST, "Estado inválido");
     db.update("update deployments set status=?,result_summary=?,finished_at=now() where id=? and status='RUNNING'", s,
         opt(b, "resultSummary"), id);
-    if (s.equals("FAILED"))
-      db.update(
-          "insert into incidents(project_id,deployment_id,title,description,severity,opened_by) values (?,?,?,?,'HIGH',?)",
-          p, id, "Fallo de despliegue #" + id, opt(b, "resultSummary"), uid());
+    if (s.equals("FAILED")) {
+      long incidentId = db.queryForObject(
+          "insert into incidents(project_id,deployment_id,title,description,severity,opened_by) values (?,?,?,?,'HIGH',?) returning id",
+          Long.class, p, id, "Fallo de despliegue #" + id, opt(b, "resultSummary"), uid());
+      audit(p, "INCIDENT_CREATED", "INCIDENT", incidentId);
+    }
     audit(p, "DEPLOYMENT_FINISHED", "DEPLOYMENT", id);
     return one("select * from deployments where id=?", id);
   }

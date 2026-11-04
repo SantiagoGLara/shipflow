@@ -102,3 +102,31 @@ export const taskApi = {
     request<Task>(`/tasks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   delete: (id: number) => request<void>(`/tasks/${id}`, { method: 'DELETE' }),
 }
+
+
+export const workflowApi = {
+  defects: (projectId: number) => request<Record<string, unknown>[]>(`/projects/${projectId}/defects`),
+  createDefect: (projectId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/projects/${projectId}/defects`, { method: 'POST', body: JSON.stringify(body) }),
+  updateDefect: (id: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/defects/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  testRuns: (projectId: number) => request<Record<string, unknown>[]>(`/projects/${projectId}/test-runs`),
+  startTestRun: (projectId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/projects/${projectId}/test-runs`, { method: 'POST', body: JSON.stringify(body) }),
+  addTestResult: (runId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/test-runs/${runId}/results`, { method: 'POST', body: JSON.stringify(body) }),
+  finishTestRun: (runId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/test-runs/${runId}/finish`, { method: 'PATCH', body: JSON.stringify(body) }),
+  releases: (projectId: number) => request<Record<string, unknown>[]>(`/projects/${projectId}/releases`),
+  createRelease: (projectId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/projects/${projectId}/releases`, { method: 'POST', body: JSON.stringify(body) }),
+  linkReleaseTask: (releaseId: number, taskId: number) => request<Record<string, unknown>>(`/releases/${releaseId}/tasks/${taskId}`, { method: 'POST' }),
+  submitRelease: (releaseId: number) => request<Record<string, unknown>>(`/releases/${releaseId}/submit`, { method: 'POST' }),
+  decideRelease: (releaseId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/releases/${releaseId}/decision`, { method: 'POST', body: JSON.stringify(body) }),
+  environments: (projectId: number) => request<Record<string, unknown>[]>(`/projects/${projectId}/environments`),
+  createEnvironment: (projectId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/projects/${projectId}/environments`, { method: 'POST', body: JSON.stringify(body) }),
+  createDeployment: (projectId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/projects/${projectId}/deployments`, { method: 'POST', body: JSON.stringify(body) }),
+  finishDeployment: (id: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/deployments/${id}/finish`, { method: 'POST', body: JSON.stringify(body) }),
+  rollback: (id: number) => request<Record<string, unknown>>(`/deployments/${id}/rollback`, { method: 'POST' }),
+  incidents: (projectId: number) => request<Record<string, unknown>[]>(`/projects/${projectId}/incidents`),
+  createIncident: (projectId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/projects/${projectId}/incidents`, { method: 'POST', body: JSON.stringify(body) }),
+  updateIncident: (id: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/incidents/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  comments: (taskId: number) => request<Record<string, unknown>[]>(`/tasks/${taskId}/comments`),
+  addComment: (taskId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/tasks/${taskId}/comments`, { method: 'POST', body: JSON.stringify(body) }),
+  requestReview: (taskId: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/tasks/${taskId}/reviews`, { method: 'POST', body: JSON.stringify(body) }),
+  resolveReview: (id: number, body: Record<string, unknown>) => request<Record<string, unknown>>(`/task-reviews/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+}

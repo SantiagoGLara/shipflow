@@ -5,6 +5,7 @@ import KanbanBoard from './components/KanbanBoard'
 import { authStorage, projectApi, taskApi, type AuthUser } from './services/api'
 import AuthScreen from './components/AuthScreen'
 import type { Project, Task } from './types'
+import WorkflowPanel from './components/WorkflowPanel'
 import './App.css'
 
 function App() {
@@ -463,6 +464,8 @@ function App() {
                 onChangeStatus={changeTaskStatus}
                 onDelete={deleteTask}
               />
+
+              <WorkflowPanel project={selectedProject} tasks={tasks} />
             </>
           )}
         </section>

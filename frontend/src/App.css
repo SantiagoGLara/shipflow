@@ -683,3 +683,32 @@ h1 {
   .sidebar-user-info { display: none; }
   .auth-card { padding: 27px; }
 }
+
+
+/* Módulos del flujo de entrega */
+.wf-panel { margin-top: 42px; padding-top: 30px; border-top: 1px solid #e6e9f0; }
+.wf-heading { display:flex; justify-content:space-between; align-items:end; margin-bottom:18px; }
+.wf-heading h2 { font-size:20px; margin:7px 0 5px; }
+.wf-heading p { color:#8994a5; font-size:12px; margin:0; }
+.wf-tabs { display:flex; gap:7px; flex-wrap:wrap; margin:20px 0; border-bottom:1px solid #e8eaf0; padding-bottom:12px; }
+.wf-tab { border:1px solid #e4e7ef; background:#fff; color:#667386; padding:9px 13px; border-radius:8px; font-size:11px; font-weight:700; }
+.wf-tab.active { background:#e9edff; border-color:#cdd4ff; color:#5366d9; }
+.wf-form { background:#fff; border:1px solid #e8eaf0; border-radius:12px; padding:20px; margin:16px 0; }
+.wf-form h3 { font-size:14px; margin:0 0 16px; }
+.wf-form p,.wf-note { color:#8994a5; font-size:11px; line-height:1.6; }
+.wf-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:13px; margin-bottom:16px; }
+.wf-field { display:block; color:#687589; font-size:11px; font-weight:700; }
+.wf-field input,.wf-field select { display:block; width:100%; margin-top:7px; min-height:38px; border:1px solid #e0e4ec; border-radius:7px; padding:9px 10px; color:#344054; background:white; font-size:12px; }
+.wf-list { display:grid; gap:9px; margin:14px 0; }
+.wf-card { display:flex; align-items:center; justify-content:space-between; gap:15px; background:white; border:1px solid #e8eaf0; border-radius:10px; padding:15px 17px; margin:9px 0; }
+.wf-card strong,.wf-card small { display:block; }
+.wf-card strong { font-size:12px; }
+.wf-card small { color:#8994a5; font-size:10px; margin-top:5px; }
+.wf-state { flex-shrink:0; color:#6375e9; background:#eef0ff; border-radius:20px; padding:6px 9px; font-size:10px; font-weight:700; }
+.wf-run { flex-wrap:wrap; }
+.wf-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.wf-actions select,.wf-inline select { border:1px solid #e0e4ec; border-radius:7px; padding:9px; background:white; color:#596579; font-size:11px; }
+.wf-inline { display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #eceef3; padding:10px 5px; color:#687589; font-size:11px; }
+.wf-notice { background:#e9f8f0; color:#22865e; border:1px solid #cdeedd; border-radius:8px; padding:11px 14px; font-size:12px; margin:12px 0; }
+.wf-note { background:#f7f8fc; border-radius:8px; padding:12px; margin:12px 0; }
+@media(max-width:650px) { .wf-fields { grid-template-columns:1fr; } .wf-card { align-items:flex-start; flex-wrap:wrap; } .wf-tabs { overflow-x:auto; flex-wrap:nowrap; } .wf-tab { white-space:nowrap; } }
