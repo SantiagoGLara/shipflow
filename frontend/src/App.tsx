@@ -10,6 +10,10 @@ function App() {
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [taskSearch, setTaskSearch] = useState('')
+  const [taskStatusFilter, setTaskStatusFilter] = useState<
+    'ALL' | Task['status']
+  >('ALL')
 
   const [activeView, setActiveView] = useState('dashboard')
   const [loading, setLoading] = useState(true)
@@ -88,6 +92,8 @@ function App() {
 
   async function selectProject(project: Project) {
     setSelectedProject(project)
+    setTaskSearch('')
+    setTaskStatusFilter('ALL')
     setActiveView('tasks')
     await loadTasks(project.id)
   }
@@ -142,6 +148,23 @@ function App() {
 
   const activeProjects = projects.filter(p => p.status === 'ACTIVE').length
   const completedTasks = tasks.filter(t => t.status === 'COMPLETED').length
+
+  const normalizedSearch = taskSearch.trim().toLocaleLowerCase()
+
+  const filteredTasks = tasks.filter(task => {
+    const matchesText =
+      task.title.toLocaleLowerCase().includes(normalizedSearch) ||
+      (task.description || '').toLocaleLowerCase().includes(normalizedSearch)
+
+    const matchesStatus =
+      taskStatusFilter === 'ALL' ||
+      task.status === taskStatusFilter
+
+    return matchesText && matchesStatus
+  })
+
+  const filtersAreActive =
+    taskSearch.trim() !== '' || taskStatusFilter !== 'ALL'
 
   return (
     <div className="app-layout">
@@ -313,14 +336,96 @@ function App() {
 
               <div className="section-heading">
                 <div>
-                  <h2>Tareas del proyecto</h2>
-                  <p>Gestiona el avance de las actividades.</p>
+                  <h2>Tablero de tareas</h2>
+                  <p>Busca, filtra y gestiona el avance de las actividades.</p>
                 </div>
-                <span className="task-counter">{tasks.length} tareas</span>
+
+                <span className="task-counter">
+                  {filteredTasks.length} de {tasks.length} tareas
+                </span>
               </div>
 
+              {/* Filtros */}
+              <div className="task-filters">
+
+                <div className="task-search-field">
+                  <label htmlFor="task-search">
+                    Buscar tarea
+                  </label>
+
+                  <input
+                    id="task-search"
+                    type="search"
+                    value={taskSearch}
+                    onChange={event => setTaskSearch(event.target.value)}
+                    placeholder="Buscar por título o descripción..."
+                  />
+                </div>
+
+                <div className="task-filter-field">
+                  <label htmlFor="task-status-filter">
+                    Estado
+                  </label>
+
+                  <select
+                    id="task-status-filter"
+                    value={taskStatusFilter}
+                    onChange={event =>
+                      setTaskStatusFilter(
+                        event.target.value as 'ALL' | Task['status']
+                      )
+                    }
+                  >
+                    <option value="ALL">Todos los estados</option>
+                    <option value="PENDING">Pendiente</option>
+                    <option value="IN_PROGRESS">En progreso</option>
+                    <option value="COMPLETED">Completada</option>
+                  </select>
+                </div>
+
+                <div className="task-filter-field">
+                  <label htmlFor="task-project-filter">
+                    Proyecto
+                  </label>
+
+                  <select
+                    id="task-project-filter"
+                    value={selectedProject.id}
+                    onChange={event => {
+                      const project = projects.find(
+                        item => item.id === Number(event.target.value)
+                      )
+
+                      if (project) {
+                        void selectProject(project)
+                      }
+                    }}
+                  >
+                    {projects.map(project => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  className="secondary-button clear-filters-button"
+                  disabled={!filtersAreActive}
+                  onClick={() => {
+                    setTaskSearch('')
+                    setTaskStatusFilter('ALL')
+                  }}
+                >
+                  Limpiar filtros
+                </button>
+
+              </div>
+
+              {/* Tablero Kanban */}
               <KanbanBoard
-                tasks={tasks}
+                tasks={filteredTasks}
                 onChangeStatus={changeTaskStatus}
                 onDelete={deleteTask}
               />
