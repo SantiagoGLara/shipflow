@@ -1,5 +1,7 @@
 package com.shipflow.projects;
 
+import com.shipflow.auth.CurrentUserService;
+import com.shipflow.tasks.TaskRepository;
 import com.shipflow.projects.dto.ProjectRequest;
 import com.shipflow.projects.dto.ProjectResponse;
 import org.springframework.http.HttpStatus;
@@ -13,14 +15,20 @@ import java.util.List;
 public class ProjectService {
 
     private final ProjectRepository repository;
+    private final TaskRepository taskRepository;
+    private final CurrentUserService currentUserService;
 
-    public ProjectService(ProjectRepository repository) {
+    public ProjectService(ProjectRepository repository, TaskRepository taskRepository,
+                          CurrentUserService currentUserService) {
         this.repository = repository;
+        this.taskRepository = taskRepository;
+        this.currentUserService = currentUserService;
     }
 
     @Transactional
     public ProjectResponse create(ProjectRequest request) {
         Project project = new Project();
+        project.setOwner(currentUserService.requireUser());
         project.setName(request.name().trim());
         project.setDescription(request.description());
         project.setStatus(
@@ -32,7 +40,7 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public List<ProjectResponse> findAll() {
-        return repository.findAll()
+        return repository.findByOwnerIdOrderByCreatedAtDesc(currentUserService.requireUser().getId())
             .stream()
             .map(this::toResponse)
             .toList();
@@ -60,11 +68,12 @@ public class ProjectService {
     @Transactional
     public void delete(Long id) {
         Project project = getProject(id);
+        taskRepository.deleteByProjectId(project.getId());
         repository.delete(project);
     }
 
     private Project getProject(Long id) {
-        return repository.findById(id)
+        return repository.findByIdAndOwnerId(id, currentUserService.requireUser().getId())
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "No existe un proyecto con ID " + id

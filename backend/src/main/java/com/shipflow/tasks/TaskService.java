@@ -1,5 +1,6 @@
 package com.shipflow.tasks;
 
+import com.shipflow.auth.CurrentUserService;
 import com.shipflow.projects.Project;
 import com.shipflow.projects.ProjectRepository;
 import com.shipflow.tasks.dto.TaskRequest;
@@ -16,13 +17,16 @@ public class TaskService {
 
     private final TaskRepository taskRepository;
     private final ProjectRepository projectRepository;
+    private final CurrentUserService currentUserService;
 
     public TaskService(
         TaskRepository taskRepository,
-        ProjectRepository projectRepository
+        ProjectRepository projectRepository,
+        CurrentUserService currentUserService
     ) {
         this.taskRepository = taskRepository;
         this.projectRepository = projectRepository;
+        this.currentUserService = currentUserService;
     }
 
     @Transactional
@@ -74,7 +78,7 @@ public class TaskService {
     }
 
     private Project getProject(Long id) {
-        return projectRepository.findById(id)
+        return projectRepository.findByIdAndOwnerId(id, currentUserService.requireUser().getId())
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "No existe un proyecto con ID " + id
@@ -82,7 +86,7 @@ public class TaskService {
     }
 
     private Task getTask(Long id) {
-        return taskRepository.findById(id)
+        return taskRepository.findByIdAndProjectOwnerId(id, currentUserService.requireUser().getId())
             .orElseThrow(() -> new ResponseStatusException(
                 HttpStatus.NOT_FOUND,
                 "No existe una tarea con ID " + id
