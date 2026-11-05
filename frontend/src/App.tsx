@@ -3,10 +3,13 @@ import Sidebar from './components/Sidebar'
 import ProjectCard from './components/ProjectCard'
 import KanbanBoard from './components/KanbanBoard'
 import { projectApi, taskApi } from './services/api'
-import type { Project, Task } from './types'
+import type { Project, Task, AuthUser } from './types'
+import AuthScreen from './components/AuthScreen'
+import CollaborationPanel from './components/CollaborationPanel'
+import { tokenStore } from './services/api'
 import './App.css'
 
-function App() {
+function WorkspaceApp({ user, onLogout }: { user: AuthUser; onLogout: () => void }) {
   const [projects, setProjects] = useState<Project[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
@@ -190,10 +193,7 @@ function App() {
             </strong>
           </div>
 
-          <div className="topbar-right">
-            <span className="connection-indicator"></span>
-            API conectada
-          </div>
+          <div className="topbar-right"><span>{user.name}</span><button className="secondary-button" onClick={onLogout}>Cerrar sesión</button></div>
         </header>
 
         <section className="page-content">
@@ -429,6 +429,7 @@ function App() {
                 onChangeStatus={changeTaskStatus}
                 onDelete={deleteTask}
               />
+              <CollaborationPanel projectId={selectedProject.id} tasks={tasks} user={user} />
             </>
           )}
         </section>
@@ -513,4 +514,22 @@ function App() {
   )
 }
 
-export default App
+export default function App() {
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    const saved = localStorage.getItem('shipflow_user')
+    try { return saved ? JSON.parse(saved) as AuthUser : null } catch { return null }
+  })
+  const handleAuthenticated = (nextUser: AuthUser) => {
+    localStorage.setItem('shipflow_user', JSON.stringify(nextUser))
+    setUser(nextUser)
+  }
+  if (!tokenStore.get() || !user) {
+    if (!tokenStore.get()) { localStorage.removeItem('shipflow_user') }
+    return <AuthScreen onAuthenticated={handleAuthenticated} />
+  }
+  return <WorkspaceApp user={user} onLogout={() => {
+    tokenStore.clear()
+    localStorage.removeItem('shipflow_user')
+    setUser(null)
+  }} />
+}
