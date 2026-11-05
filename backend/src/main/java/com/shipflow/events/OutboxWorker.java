@@ -6,13 +6,13 @@ import tools.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.index.Index;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.mongodb.client.model.IndexOptions;
+import org.bson.Document;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -54,21 +54,23 @@ public class OutboxWorker {
     }
 
     @jakarta.annotation.PostConstruct
-public void ensureIndex() {
-    try {
-        mongo.getCollection("workflow_events")
-                .listIndexes()
-                .first();
+    public void ensureIndex() {
+        try {
+            // createIndex también crea la colección si todavía no existe.
+            // El índice único garantiza que un evento no se duplique al reintentar.
+            mongo.getCollection("workflow_events").createIndex(
+                    new Document("eventId", 1),
+                    new IndexOptions().unique(true)
+            );
 
-        indexReady = true;
-
-        log.info("MongoDB disponible; colección workflow_events lista");
-
-    } catch (Exception e) {
-        log.warn("MongoDB no disponible; Outbox reintentará: {}",
-                e.toString());
+            indexReady = true;
+            log.info("MongoDB disponible; índice único eventId verificado");
+        } catch (Exception e) {
+            indexReady = false;
+            log.warn("MongoDB no disponible; Outbox reintentará: {}", e.toString());
+        }
     }
-}
+
     @Scheduled(fixedDelayString = "${shipflow.outbox.poll-ms:3000}")
     public void process() {
 
@@ -76,6 +78,8 @@ public void ensureIndex() {
             ensureIndex();
             if (!indexReady) return;
         }
+
+        recoverAbandonedClaims();
 
         for (Map<String, Object> e : claim()) {
 
@@ -110,6 +114,7 @@ public void ensureIndex() {
                         UPDATE outbox_events
                         SET status='PUBLISHED',
                             processed_at=now(),
+                            claimed_at=NULL,
                             last_error=NULL
                         WHERE id=?
                         """,
@@ -138,6 +143,7 @@ public void ensureIndex() {
                         SET status=?,
                             attempts=?,
                             last_error=?,
+                            claimed_at=NULL,
                             next_attempt_at=now() + (? * interval '1 second')
                         WHERE id=?
                         """,
@@ -149,6 +155,23 @@ public void ensureIndex() {
                         id, attempts, ex.toString()
                 );
             }
+        }
+    }
+
+    private void recoverAbandonedClaims() {
+        int recovered = jdbc.update(
+                """
+                UPDATE outbox_events
+                SET status='PENDING', claimed_at=NULL,
+                    next_attempt_at=now()
+                WHERE status='PROCESSING'
+                  AND (claimed_at IS NULL
+                       OR claimed_at < now() - (? * interval '1 millisecond'))
+                """,
+                300000
+        );
+        if (recovered > 0) {
+            log.warn("Outbox recuperó {} eventos PROCESSING abandonados", recovered);
         }
     }
 
@@ -174,7 +197,7 @@ public void ensureIndex() {
 
             for (Map<String, Object> row : rows) {
                 jdbc.update(
-                        "UPDATE outbox_events SET status='PROCESSING' WHERE id=?",
+                        "UPDATE outbox_events SET status='PROCESSING', claimed_at=now() WHERE id=?",
                         row.get("id")
                 );
             }

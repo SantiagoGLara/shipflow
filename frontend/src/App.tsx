@@ -54,9 +54,25 @@ function WorkspaceApp({ user, onLogout }: { user: AuthUser; onLogout: () => void
   }
 
   useEffect(() => {
-    loadProjects()
-  }, [])
+    let cancelled = false
 
+    projectApi.getAll()
+      .then(data => {
+        if (!cancelled) setProjects(data)
+      })
+      .catch(err => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Error al cargar proyectos')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
   async function createProject(e: React.FormEvent) {
     e.preventDefault()
 
@@ -429,7 +445,7 @@ function WorkspaceApp({ user, onLogout }: { user: AuthUser; onLogout: () => void
                 onChangeStatus={changeTaskStatus}
                 onDelete={deleteTask}
               />
-              <CollaborationPanel projectId={selectedProject.id} tasks={tasks} user={user} />
+              <CollaborationPanel projectId={selectedProject.id} ownerId={selectedProject.ownerId} tasks={tasks} user={user} />
             </>
           )}
         </section>

@@ -1,4 +1,3 @@
-cat > README.md <<'EOF'
 # ShipFlow
 
 Plataforma web para la gestión de entregas de software.

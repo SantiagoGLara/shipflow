@@ -1,4 +1,3 @@
-
 package com.shipflow.projects.dto;
 
 import java.time.Instant;
@@ -8,6 +7,7 @@ public record ProjectResponse(
     String name,
     String description,
     String status,
-    Instant createdAt
+    Instant createdAt,
+    Long ownerId
 ) {
 }

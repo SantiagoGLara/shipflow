@@ -167,7 +167,8 @@ public class ProjectService {
             project.getName(),
             project.getDescription(),
             project.getStatus(),
-            project.getCreatedAt()
+            project.getCreatedAt(),
+            project.getOwner().getId()
         );
     }
 }
