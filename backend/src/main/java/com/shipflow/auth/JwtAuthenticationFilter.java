@@ -75,14 +75,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
             }
 
-        } catch (
-                io.jsonwebtoken.JwtException
-                | IllegalArgumentException
-                | org.springframework.security.core.userdetails.UsernameNotFoundException ex
-        ) {
-            SecurityContextHolder.clearContext();
-        }
-
+        } catch (Exception ex) {
+                System.err.println("ERROR JWT: " + ex.getClass().getName());
+                System.err.println("MENSAJE: " + ex.getMessage());
+                SecurityContextHolder.clearContext();
+}
+System.out.println(
+    "USUARIO AUTENTICADO: " +
+    (SecurityContextHolder.getContext().getAuthentication() != null
+        ? SecurityContextHolder.getContext().getAuthentication().getName()
+        : "ANONYMOUS")
+);
         filterChain.doFilter(request, response);
     }
 }

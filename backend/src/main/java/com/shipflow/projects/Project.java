@@ -1,13 +1,6 @@
-
 package com.shipflow.projects;
-
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.PrePersist;
-import jakarta.persistence.Table;
+import com.shipflow.users.User;
+import jakarta.persistence.*;
 
 import java.time.Instant;
 
@@ -30,6 +23,10 @@ public class Project {
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "owner_id", nullable = false)
+    private User owner;
 
     public Project() {
     }
@@ -74,5 +71,13 @@ public class Project {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public User getOwner() {
+        return owner;
+    }
+
+    public void setOwner(User owner) {
+        this.owner = owner;
     }
 }

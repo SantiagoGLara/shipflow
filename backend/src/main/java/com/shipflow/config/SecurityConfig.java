@@ -1,4 +1,10 @@
+
 package com.shipflow.config;
+
+import com.shipflow.auth.JwtAuthenticationFilter;
+
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -13,10 +19,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import com.shipflow.auth.JwtAuthenticationFilter;
-
-import jakarta.servlet.http.HttpServletResponse;
-
 @Configuration
 public class SecurityConfig {
 
@@ -26,7 +28,6 @@ public class SecurityConfig {
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
             UserDetailsService userDetailsService) {
-
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
         this.userDetailsService = userDetailsService;
     }
@@ -40,7 +41,8 @@ public class SecurityConfig {
     public DaoAuthenticationProvider authenticationProvider(
             PasswordEncoder passwordEncoder) {
 
-        DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
+        DaoAuthenticationProvider provider =
+                new DaoAuthenticationProvider(userDetailsService);
 
         provider.setPasswordEncoder(passwordEncoder);
 
@@ -51,7 +53,6 @@ public class SecurityConfig {
     public AuthenticationManager authenticationManager(
             AuthenticationConfiguration configuration)
             throws Exception {
-
         return configuration.getAuthenticationManager();
     }
 
@@ -62,32 +63,49 @@ public class SecurityConfig {
             throws Exception {
 
         http
-                .csrf(csrf -> csrf.disable())
+            .csrf(csrf -> csrf.disable())
 
-                .sessionManagement(session -> session.sessionCreationPolicy(
-                        SessionCreationPolicy.STATELESS))
+            .sessionManagement(session ->
+                session.sessionCreationPolicy(
+                    SessionCreationPolicy.STATELESS
+                )
+            )
 
-                .authenticationProvider(authenticationProvider)
+            .authenticationProvider(authenticationProvider)
 
-                .exceptionHandling(exception -> exception
-                        .authenticationEntryPoint((request, response, authException) -> {
-                            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                            response.setContentType("application/json");
-                            response.getWriter().write(
-                                    "{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}");
-                        }))
+            .exceptionHandling(exception -> exception
+                .authenticationEntryPoint((request, response, authException) -> {
 
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(
-                                "/api/auth/**",
-                                "/api/health",
-                                "/actuator/health")
-                        .permitAll()
-                        .anyRequest().authenticated())
+                    response.setStatus(
+                        HttpServletResponse.SC_UNAUTHORIZED
+                    );
 
-                .addFilterBefore(
-                        jwtAuthenticationFilter,
-                        UsernamePasswordAuthenticationFilter.class);
+                    response.setContentType("application/json");
+                    response.getWriter().write(
+                        "{\"error\":\"Unauthorized\",\"message\":\"Authentication required\"}"
+                    );
+                })
+            )
+
+            .authorizeHttpRequests(auth -> auth
+
+                // Permitir despachos internos de errores de Spring.
+                .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+
+                .requestMatchers(
+                    "/api/auth/**",
+                    "/api/health",
+                    "/actuator/health",
+                    "/error"
+                ).permitAll()
+
+                .anyRequest().authenticated()
+            )
+
+            .addFilterBefore(
+                jwtAuthenticationFilter,
+                UsernamePasswordAuthenticationFilter.class
+            );
 
         return http.build();
     }
