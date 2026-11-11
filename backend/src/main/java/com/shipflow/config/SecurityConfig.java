@@ -96,6 +96,7 @@ public class SecurityConfig {
                     "/api/auth/**",
                     "/api/health",
                     "/actuator/health",
+                    "/actuator/health/**",
                     "/error"
                 ).permitAll()
 

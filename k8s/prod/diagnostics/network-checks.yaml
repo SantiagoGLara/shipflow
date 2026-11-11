@@ -1,0 +1,167 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shipflow-netcheck-allowed-pg
+  namespace: shipflow-prod
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: backend, purpose: connectivity-check}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shipflow-app
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: k3d-shipflow-prod-agent-1
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgres-check
+          image: postgres:17
+          command: ["bash", "-ec"]
+          args:
+            - psql -v ON_ERROR_STOP=1 -c "select current_user, count(*) as projects from projects"
+          env:
+            - {name: PGHOST, value: postgres.shipflow-prod.svc.cluster.local}
+            - {name: PGPORT, value: "5432"}
+            - {name: PGDATABASE, value: shipflow}
+            - {name: PGUSER, value: shipflow_app}
+            - {name: PGPASSWORD, valueFrom: {secretKeyRef: {name: shipflow-postgres-secret, key: POSTGRES_APP_PASSWORD}}}
+            - {name: PGSSLMODE, value: verify-full}
+            - {name: PGSSLROOTCERT, value: /etc/postgres-tls/ca.crt}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 200m, memory: 256Mi}
+          volumeMounts:
+            - {name: postgres-ca, mountPath: /etc/postgres-tls, readOnly: true}
+      volumes:
+        - name: postgres-ca
+          secret: {secretName: postgres-tls, items: [{key: ca.crt, path: ca.crt}], defaultMode: 0440}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shipflow-netcheck-allowed-mongo
+  namespace: shipflow-prod
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: backend, purpose: connectivity-check}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shipflow-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: mongo-check
+          image: mongo:7.0
+          command: ["bash", "-ec"]
+          args:
+            - mongosh --host mongo.shipflow-prod.svc.cluster.local --port 27017 --tls --tlsCAFile /etc/mongo-tls/ca.crt --tlsCertificateKeyFile /etc/mongo-client/client.pem --username shipflow_app --password "$MONGO_APP_PASSWORD" --authenticationDatabase shipflow shipflow --quiet --eval 'db.adminCommand({ping:1}).ok'
+          env:
+            - {name: MONGO_APP_PASSWORD, valueFrom: {secretKeyRef: {name: shipflow-mongo-secret, key: MONGO_APP_PASSWORD}}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 300m, memory: 512Mi}
+          volumeMounts:
+            - {name: mongo-ca, mountPath: /etc/mongo-tls, readOnly: true}
+            - {name: mongo-client, mountPath: /etc/mongo-client, readOnly: true}
+      volumes:
+        - name: mongo-ca
+          secret: {secretName: mongo-tls, items: [{key: ca.crt, path: ca.crt}], defaultMode: 0440}
+        - name: mongo-client
+          secret: {secretName: mongo-client-tls, items: [{key: client.pem, path: client.pem}], defaultMode: 0440}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shipflow-netcheck-denied-pg
+  namespace: shipflow-prod
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: network-check-denied, purpose: connectivity-check}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: postgres-check
+          image: postgres:17
+          command: ["bash", "-ec"]
+          args:
+            - if pg_isready -h postgres.shipflow-prod.svc.cluster.local -p 5432 -t 3; then echo UNEXPECTED_ALLOWED; exit 1; else echo DENIED_EXPECTED; fi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {cpu: 100m, memory: 128Mi}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shipflow-netcheck-denied-mongo
+  namespace: shipflow-prod
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: {app: network-check-denied, purpose: connectivity-check}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: mongo-check
+          image: mongo:7.0
+          command: ["bash", "-ec"]
+          args:
+            - if timeout 8 mongosh --host mongo.shipflow-prod.svc.cluster.local --port 27017 --tls --tlsCAFile /etc/mongo-tls/ca.crt --tlsCertificateKeyFile /etc/mongo-client/client.pem --username shipflow_app --password "$MONGO_APP_PASSWORD" --authenticationDatabase shipflow shipflow --quiet --eval 'db.adminCommand({ping:1}).ok'; then echo UNEXPECTED_ALLOWED; exit 1; else echo DENIED_EXPECTED; fi
+          env:
+            - {name: MONGO_APP_PASSWORD, valueFrom: {secretKeyRef: {name: shipflow-mongo-secret, key: MONGO_APP_PASSWORD}}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: mongo-ca, mountPath: /etc/mongo-tls, readOnly: true}
+            - {name: mongo-client, mountPath: /etc/mongo-client, readOnly: true}
+      volumes:
+        - name: mongo-ca
+          secret: {secretName: mongo-tls, items: [{key: ca.crt, path: ca.crt}], defaultMode: 0440}
+        - name: mongo-client
+          secret: {secretName: mongo-client-tls, items: [{key: client.pem, path: client.pem}], defaultMode: 0440}

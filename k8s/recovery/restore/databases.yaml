@@ -1,0 +1,235 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: shipflow-recovery
+spec:
+  selector:
+    app: recovery-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: shipflow-recovery
+spec:
+  selector:
+    app: recovery-mongo
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: recovery-postgres-init
+  namespace: shipflow-recovery
+data:
+  10-app-role.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" --set=app_password="$APP_PASSWORD" <<'SQL'
+    CREATE ROLE shipflow_app LOGIN PASSWORD :'app_password';
+    GRANT CONNECT ON DATABASE shipflow TO shipflow_app;
+    SQL
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: recovery-postgres
+  namespace: shipflow-recovery
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recovery-postgres
+  template:
+    metadata:
+      labels:
+        app: recovery-postgres
+    spec:
+      serviceAccountName: shipflow-recovery-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: recovery-mongo
+      containers:
+        - name: postgres
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: shipflow
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-postgres
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-postgres
+                  key: POSTGRES_PASSWORD
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-postgres
+                  key: POSTGRES_APP_PASSWORD
+          ports:
+            - name: postgres
+              containerPort: 5432
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 768Mi
+          startupProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"']
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d/10-app-role.sh
+              subPath: 10-app-role.sh
+              readOnly: true
+      volumes:
+        - name: init
+          configMap:
+            name: recovery-postgres-init
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: recovery-mongo
+  namespace: shipflow-recovery
+spec:
+  serviceName: mongo
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recovery-mongo
+  template:
+    metadata:
+      labels:
+        app: recovery-mongo
+    spec:
+      serviceAccountName: shipflow-recovery-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app: recovery-postgres
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          args: [mongod, --bind_ip_all, --auth]
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: shipflow
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-mongo
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-mongo
+                  key: MONGO_INITDB_ROOT_PASSWORD
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-mongo
+                  key: MONGO_APP_PASSWORD
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 750m
+              memory: 768Mi
+          startupProbe:
+            exec:
+              command: [sh, -c, 'mongosh --quiet --eval "db.adminCommand(\"ping\").ok"']
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: [sh, -c, 'mongosh --quiet --eval "db.adminCommand(\"ping\").ok"']
+            periodSeconds: 5
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 1Gi

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shipflow-backup
+  namespace: shipflow-recovery
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shipflow-restore
+  namespace: shipflow-recovery
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shipflow-recovery-app
+  namespace: shipflow-recovery
+automountServiceAccountToken: false

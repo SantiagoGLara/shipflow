@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shipflow-app
+  namespace: shipflow-prod
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: shipflow-operator
+  namespace: shipflow-prod
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: shipflow-operator-readonly
+  namespace: shipflow-prod
+rules:
+  - apiGroups: ["", "apps", "networking.k8s.io", "autoscaling"]
+    resources: ["pods", "pods/log", "services", "endpoints", "configmaps", "deployments", "statefulsets", "networkpolicies", "ingresses", "horizontalpodautoscalers", "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: shipflow-operator-readonly
+  namespace: shipflow-prod
+subjects:
+  - kind: ServiceAccount
+    name: shipflow-operator
+    namespace: shipflow-prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: shipflow-operator-readonly

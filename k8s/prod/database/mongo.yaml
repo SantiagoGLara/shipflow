@@ -1,0 +1,190 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo-headless
+  namespace: shipflow-prod
+spec:
+  clusterIP: None
+  selector:
+    app: mongo
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: shipflow-prod
+spec:
+  selector:
+    app: mongo
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-init
+  namespace: shipflow-prod
+data:
+  10-app-user.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    mongosh --host 127.0.0.1 --tls --tlsCAFile /etc/mongo/tls/ca.crt --tlsCertificateKeyFile /etc/mongo/client/client.pem --tlsAllowInvalidHostnames "$MONGO_INITDB_DATABASE" --quiet \
+      --eval "db.createUser({user:'shipflow_app',pwd:'$MONGO_APP_PASSWORD',roles:[{role:'readWrite',db:'$MONGO_INITDB_DATABASE'}]})"
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  namespace: shipflow-prod
+spec:
+  serviceName: mongo-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values: [postgres]
+      containers:
+        - name: mongo
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - mongod
+            - --bind_ip_all
+            - --auth
+            - --tlsMode
+            - requireTLS
+            - --tlsCertificateKeyFile
+            - /etc/mongo/tls/server.pem
+            - --tlsCAFile
+            - /etc/mongo/tls/ca.crt
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: shipflow
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-mongo-secret
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-mongo-secret
+                  key: MONGO_INITDB_ROOT_PASSWORD
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-mongo-secret
+                  key: MONGO_APP_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  mongosh --host 127.0.0.1 --tls --tlsCAFile /etc/mongo/tls/ca.crt --tlsCertificateKeyFile /etc/mongo/client/client.pem
+                  --tlsAllowInvalidHostnames --username "$MONGO_INITDB_ROOT_USERNAME"
+                  --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+                  --quiet --eval 'db.adminCommand("ping").ok'
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  mongosh --host 127.0.0.1 --tls --tlsCAFile /etc/mongo/tls/ca.crt --tlsCertificateKeyFile /etc/mongo/client/client.pem
+                  --tlsAllowInvalidHostnames --username "$MONGO_INITDB_ROOT_USERNAME"
+                  --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+                  --quiet --eval 'db.adminCommand("ping").ok'
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - >-
+                  mongosh --host 127.0.0.1 --tls --tlsCAFile /etc/mongo/tls/ca.crt --tlsCertificateKeyFile /etc/mongo/client/client.pem
+                  --tlsAllowInvalidHostnames --username "$MONGO_INITDB_ROOT_USERNAME"
+                  --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
+                  --quiet --eval 'db.adminCommand("ping").ok'
+            periodSeconds: 10
+            failureThreshold: 6
+          volumeMounts:
+            - name: mongo-data
+              mountPath: /data/db
+            - name: mongo-tls
+              mountPath: /etc/mongo/tls
+              readOnly: true
+            - name: mongo-client-tls
+              mountPath: /etc/mongo/client
+              readOnly: true
+            - name: mongo-init
+              mountPath: /docker-entrypoint-initdb.d/10-app-user.sh
+              subPath: 10-app-user.sh
+              readOnly: true
+      volumes:
+        - name: mongo-tls
+          secret:
+            secretName: mongo-tls
+            defaultMode: 0440
+        - name: mongo-client-tls
+          secret:
+            secretName: mongo-client-tls
+            defaultMode: 0440
+        - name: mongo-init
+          configMap:
+            name: mongo-init
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: mongo-data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests:
+            storage: 5Gi

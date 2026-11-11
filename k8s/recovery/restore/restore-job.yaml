@@ -1,0 +1,151 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shipflow-restore-verified
+  namespace: shipflow-recovery
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app: restore
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shipflow-restore
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres-restore
+          image: postgres:17
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              start=$(date +%s)
+              file=$(find /backups -maxdepth 1 -type f -name "postgres-${BACKUP_RUN_ID}-*.dump.enc" -print -quit)
+              test -n "$file"
+              cd /backups
+              base=${file##*/}
+              sha256sum -c "$base.sha256"
+              expected=$(awk '{print $1}' "$base.hmac")
+              actual=$(openssl dgst -sha256 -hmac "$BACKUP_HMAC_KEY" "$base" | awk '{print $NF}')
+              test "$expected" = "$actual"
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:BACKUP_ENCRYPTION_KEY -in "$base" | pg_restore --no-owner --exit-on-error --dbname='postgresql://restore_admin:'"$POSTGRES_PASSWORD"'@postgres:5432/shipflow?sslmode=disable'
+              PGPASSWORD="$POSTGRES_PASSWORD" psql -h postgres -U restore_admin -d shipflow -v ON_ERROR_STOP=1 <<'SQL'
+              GRANT USAGE ON SCHEMA public TO shipflow_app;
+              GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO shipflow_app;
+              GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO shipflow_app;
+              SQL
+              end=$(date +%s)
+              echo "PostgreSQL restore complete: file=$base seconds=$((end-start))"
+          env:
+            - name: BACKUP_RUN_ID
+              value: shipflow-db-backup-verified-1794362332-x96n2
+            - name: BACKUP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-backup-keys
+                  key: BACKUP_ENCRYPTION_KEY
+            - name: BACKUP_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-backup-keys
+                  key: BACKUP_HMAC_KEY
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-postgres
+                  key: POSTGRES_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: backup-data
+              mountPath: /backups
+              readOnly: true
+        - name: mongo-restore
+          image: mongo:7.0
+          imagePullPolicy: IfNotPresent
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              start=$(date +%s)
+              file=$(find /backups -maxdepth 1 -type f -name "mongo-${BACKUP_RUN_ID}-*.archive.gz.enc" -print -quit)
+              test -n "$file"
+              cd /backups
+              base=${file##*/}
+              sha256sum -c "$base.sha256"
+              expected=$(awk '{print $1}' "$base.hmac")
+              actual=$(openssl dgst -sha256 -hmac "$BACKUP_HMAC_KEY" "$base" | awk '{print $NF}')
+              test "$expected" = "$actual"
+              work=$(mktemp -d)
+              trap 'rm -rf "$work"' EXIT
+              openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass env:BACKUP_ENCRYPTION_KEY -in "$base" -out "$work/archive.gz"
+              mongorestore --host mongo --port 27017 --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --archive="$work/archive.gz" --gzip --drop --nsInclude='shipflow.*'
+              mongosh --host mongo --port 27017 --username "$MONGO_INITDB_ROOT_USERNAME" --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin shipflow --quiet --eval "db.createUser({user:'shipflow_app',pwd:process.env.MONGO_APP_PASSWORD,roles:[{role:'readWrite',db:'shipflow'}]})"
+              end=$(date +%s)
+              echo "MongoDB restore complete: file=$base seconds=$((end-start))"
+          env:
+            - name: BACKUP_RUN_ID
+              value: shipflow-db-backup-verified-1794362332-x96n2
+            - name: BACKUP_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-backup-keys
+                  key: BACKUP_ENCRYPTION_KEY
+            - name: BACKUP_HMAC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-backup-keys
+                  key: BACKUP_HMAC_KEY
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-mongo
+                  key: MONGO_INITDB_ROOT_USERNAME
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-mongo
+                  key: MONGO_INITDB_ROOT_PASSWORD
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-recovery-mongo
+                  key: MONGO_APP_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: backup-data
+              mountPath: /backups
+              readOnly: true
+      volumes:
+        - name: backup-data
+          persistentVolumeClaim:
+            claimName: shipflow-backups

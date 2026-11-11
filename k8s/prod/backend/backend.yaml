@@ -1,0 +1,108 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: shipflow-prod
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+    spec:
+      serviceAccountName: shipflow-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: shipflow-backend:prod-1.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: shipflow-backend-secret
+          env:
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
+            - name: SHIPFLOW_OUTBOX_ENABLED
+              value: "true"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 768Mi
+            limits:
+              cpu: "1"
+              memory: 1536Mi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/shipflow/postgres
+              readOnly: true
+            - name: mongo-java-tls
+              mountPath: /etc/shipflow/mongo
+              readOnly: true
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: postgres-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: mongo-java-tls
+          secret:
+            secretName: shipflow-backend-mongo-tls
+            items:
+              - key: truststore.p12
+                path: truststore.p12
+              - key: client.p12
+                path: client.p12
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: shipflow-prod
+spec:
+  type: ClusterIP
+  selector:
+    app: backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

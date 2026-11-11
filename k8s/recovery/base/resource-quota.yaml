@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: shipflow-recovery-quota
+  namespace: shipflow-recovery
+spec:
+  hard:
+    requests.cpu: "3"
+    requests.memory: 4Gi
+    limits.cpu: "6"
+    limits.memory: 6Gi
+    pods: "20"
+    persistentvolumeclaims: "5"
+    requests.storage: 10Gi
