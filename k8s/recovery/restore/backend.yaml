@@ -1,0 +1,76 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: recovery-backend
+  namespace: shipflow-recovery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: recovery-backend
+  template:
+    metadata:
+      labels:
+        app: recovery-backend
+    spec:
+      serviceAccountName: shipflow-recovery-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backend
+          image: shipflow-backend:prod-1.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: shipflow-recovery-backend
+          env:
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
+            - name: SHIPFLOW_OUTBOX_ENABLED
+              value: "true"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: 750m
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: recovery-backend
+  namespace: shipflow-recovery
+spec:
+  selector:
+    app: recovery-backend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

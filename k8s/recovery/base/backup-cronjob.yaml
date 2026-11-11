@@ -1,0 +1,210 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: shipflow-db-backup
+  namespace: shipflow-recovery
+spec:
+  schedule: "0 2 * * *"
+  timeZone: America/Mexico_City
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 1800
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: backup
+        spec:
+          restartPolicy: Never
+          serviceAccountName: shipflow-backup
+          automountServiceAccountToken: false
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - topologyKey: kubernetes.io/hostname
+                  labelSelector:
+                    matchExpressions:
+                      - key: app
+                        operator: In
+                        values: [postgres, mongo]
+                  namespaceSelector:
+                    matchLabels:
+                      kubernetes.io/metadata.name: shipflow-prod
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 999
+            runAsGroup: 999
+            fsGroup: 999
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: postgres-backup
+              image: postgres:17
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  umask 077
+                  export PGPASSWORD="$POSTGRES_PASSWORD"
+                  for attempt in $(seq 1 12); do
+                    if psql -At -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>&1; then break; fi
+                    echo "Waiting for PostgreSQL (attempt $attempt/12)" >&2
+                    sleep 5
+                  done
+                  pending=$(psql -At -v ON_ERROR_STOP=1 -c "SELECT count(*) FROM outbox_events WHERE status <> 'PUBLISHED'")
+                  if [[ "$pending" != "0" ]]; then
+                    echo "Outbox has unpublished rows; backup aborted to preserve cross-database recoverability." >&2
+                    exit 1
+                  fi
+                  run_id=${BACKUP_RUN_ID//[^a-zA-Z0-9-]/-}
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  base="postgres-${run_id}-${stamp}.dump.enc"
+                  work=$(mktemp -d /backups/.pg-work.XXXXXX)
+                  trap 'rm -rf "$work"' EXIT
+                  pg_dump --format=custom --dbname="$PGDATABASE" \
+                    | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -md sha256 \
+                        -pass env:BACKUP_ENCRYPTION_KEY -out "$work/$base"
+                  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+                    -pass env:BACKUP_ENCRYPTION_KEY -in "$work/$base" -out "$work/verify.dump"
+                  pg_restore --list "$work/verify.dump" >/dev/null
+                  sha=$(sha256sum "$work/$base" | awk '{print $1}')
+                  hmac=$(openssl dgst -sha256 -hmac "$BACKUP_HMAC_KEY" "$work/$base" | awk '{print $NF}')
+                  verified_hmac=$(openssl dgst -sha256 -hmac "$BACKUP_HMAC_KEY" "$work/$base" | awk '{print $NF}')
+                  [[ "$hmac" == "$verified_hmac" ]]
+                  counts=$(psql -At -v ON_ERROR_STOP=1 -c "SELECT json_build_object('users',(SELECT count(*) FROM users),'projects',(SELECT count(*) FROM projects),'tasks',(SELECT count(*) FROM tasks),'task_reviews',(SELECT count(*) FROM task_reviews),'outbox_events',(SELECT count(*) FROM outbox_events))::text")
+                  size=$(stat -c '%s' "$work/$base")
+                  printf '%s  %s\n' "$sha" "$base" > "$work/$base.sha256"
+                  printf '%s  %s\n' "$hmac" "$base" > "$work/$base.hmac"
+                  printf 'engine=postgres\nrun_id=%s\ncreated_at_utc=%s\nfile=%s\nsize_bytes=%s\nsha256=%s\nhmac_sha256=%s\nrecord_counts=%s\n' \
+                    "$BACKUP_RUN_ID" "$stamp" "$base" "$size" "$sha" "$hmac" "$counts" > "$work/$base.meta"
+                  mv "$work/$base" "$work/$base.sha256" "$work/$base.hmac" /backups/
+                  mv "$work/$base.meta" "/backups/$base.meta"
+                  find /backups -maxdepth 1 -type f -name 'postgres-*.dump.enc*' -mtime +14 -delete
+                  find /backups -maxdepth 1 -type f -name 'postgres-*.meta' -mtime +14 -delete
+                  echo "PostgreSQL backup verified: $base, ${size} bytes, counts=$counts"
+              envFrom:
+                - secretRef:
+                    name: shipflow-production-postgres-source
+                - secretRef:
+                    name: shipflow-backup-keys
+              env:
+                - name: PGSSLMODE
+                  value: verify-full
+                - name: PGSSLROOTCERT
+                  value: /etc/prod-postgres-tls/ca.crt
+                - name: BACKUP_RUN_ID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backups
+                - name: postgres-prod-ca
+                  mountPath: /etc/prod-postgres-tls
+                  readOnly: true
+            - name: mongo-backup
+              image: mongo:7.0
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  umask 077
+                  run_id=${BACKUP_RUN_ID//[^a-zA-Z0-9-]/-}
+                  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+                  base="mongo-${run_id}-${stamp}.archive.gz.enc"
+                  work=$(mktemp -d /backups/.mongo-work.XXXXXX)
+                  trap 'rm -rf "$work"' EXIT
+                  count=$(mongosh --host "$MONGO_HOST" --port 27017 --tls \
+                    --tlsCAFile /etc/prod-mongo-tls/ca.crt \
+                    --tlsCertificateKeyFile /etc/prod-mongo-client/client.pem \
+                    --username "$MONGO_USER" --password "$MONGO_PASSWORD" \
+                    --authenticationDatabase shipflow shipflow --quiet \
+                    --eval 'db.workflow_events.countDocuments({})')
+                  mongodump --host "$MONGO_HOST" --port 27017 --db shipflow \
+                    --username "$MONGO_USER" --password "$MONGO_PASSWORD" \
+                    --authenticationDatabase shipflow --ssl \
+                    --sslCAFile /etc/prod-mongo-tls/ca.crt \
+                    --sslPEMKeyFile /etc/prod-mongo-client/client.pem \
+                    --archive --gzip \
+                    | openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 -md sha256 \
+                        -pass env:BACKUP_ENCRYPTION_KEY -out "$work/$base"
+                  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 \
+                    -pass env:BACKUP_ENCRYPTION_KEY -in "$work/$base" -out "$work/verify.archive.gz"
+                  mongorestore --host "$MONGO_HOST" --port 27017 --username "$MONGO_USER" --password "$MONGO_PASSWORD" --authenticationDatabase shipflow --ssl --sslCAFile /etc/prod-mongo-tls/ca.crt --sslPEMKeyFile /etc/prod-mongo-client/client.pem --dryRun --gzip --archive="$work/verify.archive.gz" --nsInclude='shipflow.*' >/dev/null
+                  sha=$(sha256sum "$work/$base" | awk '{print $1}')
+                  hmac=$(openssl dgst -sha256 -hmac "$BACKUP_HMAC_KEY" "$work/$base" | awk '{print $NF}')
+                  verified_hmac=$(openssl dgst -sha256 -hmac "$BACKUP_HMAC_KEY" "$work/$base" | awk '{print $NF}')
+                  [[ "$hmac" == "$verified_hmac" ]]
+                  size=$(stat -c '%s' "$work/$base")
+                  printf '%s  %s\n' "$sha" "$base" > "$work/$base.sha256"
+                  printf '%s  %s\n' "$hmac" "$base" > "$work/$base.hmac"
+                  printf 'engine=mongodb\nrun_id=%s\ncreated_at_utc=%s\nfile=%s\nsize_bytes=%s\nsha256=%s\nhmac_sha256=%s\nworkflow_events=%s\n' \
+                    "$BACKUP_RUN_ID" "$stamp" "$base" "$size" "$sha" "$hmac" "$count" > "$work/$base.meta"
+                  mv "$work/$base" "$work/$base.sha256" "$work/$base.hmac" /backups/
+                  mv "$work/$base.meta" "/backups/$base.meta"
+                  find /backups -maxdepth 1 -type f -name 'mongo-*.archive.gz.enc*' -mtime +14 -delete
+                  find /backups -maxdepth 1 -type f -name 'mongo-*.meta' -mtime +14 -delete
+                  echo "MongoDB backup verified: $base, ${size} bytes, workflow_events=$count"
+              envFrom:
+                - secretRef:
+                    name: shipflow-production-mongo-source
+                - secretRef:
+                    name: shipflow-backup-keys
+              env:
+                - name: BACKUP_RUN_ID
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: metadata.name
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              resources:
+                requests:
+                  cpu: 100m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+              volumeMounts:
+                - name: backup-data
+                  mountPath: /backups
+                - name: mongo-prod-ca
+                  mountPath: /etc/prod-mongo-tls
+                  readOnly: true
+                - name: mongo-prod-client
+                  mountPath: /etc/prod-mongo-client
+                  readOnly: true
+          volumes:
+            - name: backup-data
+              persistentVolumeClaim:
+                claimName: shipflow-backups
+            - name: postgres-prod-ca
+              secret:
+                secretName: production-postgres-ca
+                defaultMode: 0440
+            - name: mongo-prod-ca
+              secret:
+                secretName: production-mongo-ca
+                defaultMode: 0440
+            - name: mongo-prod-client
+              secret:
+                secretName: production-mongo-client
+                defaultMode: 0440

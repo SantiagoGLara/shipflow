@@ -1,0 +1,80 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: backend-migrate
+  namespace: shipflow-prod
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: migration
+    spec:
+      restartPolicy: Never
+      serviceAccountName: shipflow-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: flyway
+          image: shipflow-backend:prod-1.1
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: shipflow-backend-secret
+          env:
+            - name: POSTGRES_USER
+              value: shipflow_migrator
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shipflow-postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: SERVER_PORT
+              value: "0"
+            - name: SHIPFLOW_MIGRATIONS_EXIT_ON_COMPLETE
+              value: "true"
+            - name: SPRING_FLYWAY_ENABLED
+              value: "true"
+            - name: SHIPFLOW_OUTBOX_ENABLED
+              value: "false"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/shipflow/postgres
+              readOnly: true
+            - name: mongo-java-tls
+              mountPath: /etc/shipflow/mongo
+              readOnly: true
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: postgres-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: mongo-java-tls
+          secret:
+            secretName: shipflow-backend-mongo-tls
+            items:
+              - key: truststore.p12
+                path: truststore.p12
+              - key: client.p12
+                path: client.p12
