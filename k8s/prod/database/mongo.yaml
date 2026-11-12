@@ -129,6 +129,7 @@ spec:
                   --tlsAllowInvalidHostnames --username "$MONGO_INITDB_ROOT_USERNAME"
                   --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
                   --quiet --eval 'db.adminCommand("ping").ok'
+            timeoutSeconds: 5
             periodSeconds: 10
             failureThreshold: 30
           readinessProbe:
@@ -141,6 +142,7 @@ spec:
                   --tlsAllowInvalidHostnames --username "$MONGO_INITDB_ROOT_USERNAME"
                   --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
                   --quiet --eval 'db.adminCommand("ping").ok'
+            timeoutSeconds: 5
             periodSeconds: 5
           livenessProbe:
             exec:
@@ -152,6 +154,7 @@ spec:
                   --tlsAllowInvalidHostnames --username "$MONGO_INITDB_ROOT_USERNAME"
                   --password "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin
                   --quiet --eval 'db.adminCommand("ping").ok'
+            timeoutSeconds: 5
             periodSeconds: 10
             failureThreshold: 6
           volumeMounts:

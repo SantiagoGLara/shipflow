@@ -1,6 +1,3 @@
-# Inventario de recursos de ShipFlow
-
-**Corte:** 10 de noviembre de 2026, hora de Ciudad de México. Este inventario describe los manifiestos y recursos observados en `k3d-shipflow-dev` y `k3d-shipflow-prod`, además del espacio de recuperación `shipflow-recovery`. Los valores de consumo son una fotografía y pueden cambiar. No se incluyen valores de Secrets.
 
 ## 1. Aplicación y servicios
 
@@ -13,7 +10,7 @@
 | Entrada | Traefik Ingress en K3s | Termina HTTPS y dirige tráfico al Service frontend |
 | Orquestación | K3s 1.35.5+k3s1, administrado localmente con k3d | Dos clústeres Kubernetes locales ejecutados en contenedores Docker |
 
-ShipFlow **no usa Prisma ni Tailwind** en su configuración actual. La transcripción menciona esos productos como ejemplo del modo de presentar un proyecto; el frontend real utiliza CSS y el backend Java/JPA/Flyway.
+El frontend real utiliza CSS y el backend Java/JPA/Flyway.
 
 ## 2. Clústeres y capacidad del host
 
@@ -137,3 +134,8 @@ kubectl --context k3d-shipflow-prod top nodes
 ```
 
 No copiar la salida completa de `kubectl get secret -o yaml` al informe; puede exponer credenciales o certificados privados.
+
+
+
+```bash
+``` 

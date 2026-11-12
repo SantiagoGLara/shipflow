@@ -18,30 +18,33 @@ curl -k -sS -o /dev/null -w 'HTTP %{http_code}\n' \
 
 Continúa si los nodos están `Ready`, los Deployments están disponibles, las bases están `Running` y la salud HTTPS devuelve 200. En el cluster productivo de laboratorio el backend y frontend tienen dos réplicas.
 
+# ver replicas/deployments prod
+```bash
+kubectl --context k3d-shipflow-prod -n shipflow-prod get deployments
+##cambiar minimo de replicas 
+  kubectl --context k3d-shipflow-prod -n shipflow-prod \
+  patch hpa backend --type merge -p '{"spec":{"minReplicas":2}}'
+```
 ## Retirar un Pod de backend
 
 1. En una terminal, identifica los dos Pods y el nodo que ocupa cada uno:
 
 ```bash
-kubectl --context k3d-shipflow-prod -n shipflow-prod \
-  get pods -l app=backend -o wide
+kubectl --context k3d-shipflow-prod -n shipflow-prod get pods -l app=backend -o wide
 ```
 
 2. Elige **un nombre concreto** de la lista y elimínalo. No uses `-l app=backend` en `delete pod`: ese selector borraría los dos.
 
 ```bash
-kubectl --context k3d-shipflow-prod -n shipflow-prod \
-  delete pod <nombre-de-un-solo-pod>
+kubectl --context k3d-shipflow-prod -n shipflow-prod delete pod <nombre-de-un-solo-pod>
 ```
 
 3. Observa cómo el ReplicaSet crea el reemplazo y cuándo vuelve a 2/2:
 
 ```bash
-kubectl --context k3d-shipflow-prod -n shipflow-prod \
-  get deployment backend -w
+kubectl --context k3d-shipflow-prod -n shipflow-prod get deployment backend -w
 
-kubectl --context k3d-shipflow-prod -n shipflow-prod \
-  get pods -l app=backend -w
+kubectl --context k3d-shipflow-prod -n shipflow-prod get pods -l app=backend -w
 ```
 
 En otra terminal, consulta el endpoint cada segundo durante la prueba:
@@ -150,3 +153,75 @@ curl -k -sS -o /dev/null -w 'HTTP %{http_code}\n' \
 ## Evidencia que conviene guardar
 
 Para cada ensayo anota fecha y hora, contexto, recurso afectado, comando, estado inicial, tiempo de recuperación, respuesta del endpoint, logs, estado final de Pods/Services/PVC y resultado esperado/observado. No incluyas contraseñas, tokens ni llaves privadas. Los Jobs de red no revelan credenciales en su salida.
+
+
+```bash
+kubectl --context k3d-shipflow-prod -n shipflow-prod patch hpa backend --type merge -p '{"spec":{"minReplicas":4}}'
+```
+## Ensayo preliminar de carga
+
+### Medición ejecutada en desarrollo
+
+El 11 de noviembre se hizo un ensayo de solo lectura sobre `GET /api/projects`, con cuenta sintética y cuatro solicitudes concurrentes durante 60 segundos. La petición atravesó el backend y consultó PostgreSQL. Resultados: 5,401 solicitudes, 90.02 solicitudes/s, p50 26.76 ms, p95 98.18 ms, p99 316.15 ms, 5,401 respuestas HTTP 200 y 0% de errores. Esta es una comprobación preliminar; no es el experimento de aceptación del HPA porque desarrollo no tiene HPA y no se midieron cinco minutos de línea base ni diez minutos de carga.
+
+### Ensayo formal de HPA en producción
+
+Antes de enviar carga, confirma backend/frontend listos, PostgreSQL y MongoDB `1/1 Ready`, y HPA en mínimo 2, máximo 6 y CPU objetivo 60%:
+
+```bash
+kubectl --context k3d-shipflow-prod -n shipflow-prod get pods,hpa
+kubectl --context k3d-shipflow-prod -n shipflow-prod describe hpa backend
+kubectl --context k3d-shipflow-prod top pods
+kubectl --context k3d-shipflow-prod -n shipflow-prod get endpointslices
+```
+
+Mide cinco minutos de línea base y registra réplicas, CPU, memoria, RPS, p95 y errores. Después ejecuta diez minutos de carga gradual sobre la lectura autenticada `GET /api/projects` (no sobre archivos estáticos), con cuenta sintética y concurrencia anotada. Durante toda la prueba observa, en terminales separadas:
+
+```bash
+kubectl --context k3d-shipflow-prod -n shipflow-prod get hpa backend -w
+kubectl --context k3d-shipflow-prod -n shipflow-prod get pods -l app=backend -w
+kubectl --context k3d-shipflow-prod top pods -w
+```
+
+Al terminar, detén el generador de carga y observa la reducción hacia dos réplicas durante la ventana de estabilización de cinco minutos. Registra el generador y versión, concurrencia, duración, solicitudes, errores, latencias p50/p95/p99, réplicas deseadas/listas, uso de bases y eventos. No escales las bases de datos para compensar saturación.
+
+**Bloqueo observado al preparar la prueba:** el MongoDB de producción quedó `0/1 Ready` con reinicios de contenedor y probes de solo un segundo; el HPA del backend reporta temporalmente mínimo 4, máximo 6 y CPU 1%. No ejecutes el ensayo de estrés en producción hasta recuperar MongoDB y devolver el mínimo HPA a 2. El ensayo preliminar se mantuvo en desarrollo.
+
+### Repetir el ensayo preliminar de desarrollo
+
+El script `scripts/run-readonly-load.py` envía únicamente GET autenticados a `/api/projects`; requiere Python 3. Para abrir la API en un terminal:
+
+```bash
+kubectl --context k3d-shipflow-dev -n shipflow-dev \
+  port-forward service/backend 18081:8080
+```
+
+En otro terminal, crea una cuenta sintética de prueba y guarda su token sin imprimirlo:
+
+```bash
+python3 - <<'PY'
+import json, secrets, time
+with open('/tmp/shipflow-load-user.json', 'w') as f:
+    json.dump({'name':'Load Test', 'email':f'load-{int(time.time())}@example.test',
+               'password':secrets.token_urlsafe(24)}, f)
+PY
+chmod 600 /tmp/shipflow-load-user.json
+curl -sS -o /tmp/shipflow-load-register.json \
+  -H 'Content-Type: application/json' \
+  --data-binary @/tmp/shipflow-load-user.json \
+  http://127.0.0.1:18081/api/auth/register
+jq -er '.token' /tmp/shipflow-load-register.json > /tmp/shipflow-load-token
+chmod 600 /tmp/shipflow-load-token
+```
+
+Mide los recursos antes y durante la carga en una tercera terminal:
+
+```bash
+kubectl --context k3d-shipflow-dev -n shipflow-dev top pods
+LOAD_SECONDS=60 LOAD_CONCURRENCY=4 \
+  TOKEN_FILE=/tmp/shipflow-load-token \
+  python3 scripts/run-readonly-load.py
+kubectl --context k3d-shipflow-dev -n shipflow-dev top pods
+```
+
+El resultado es una línea JSON con RPS, códigos HTTP, errores y p50/p95/p99. Para repetir con la misma cuenta, conserva los archivos temporales con permisos 600 mientras los necesites; al terminar, elimina `/tmp/shipflow-load-user.json`, `/tmp/shipflow-load-register.json` y `/tmp/shipflow-load-token`. El usuario sintético creado permanece en la base dev. El port-forward se cierra con `Ctrl+C`.
